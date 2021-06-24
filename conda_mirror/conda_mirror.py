@@ -22,7 +22,7 @@ logger = None
 
 DEFAULT_BAD_LICENSES = ["agpl", ""]
 
-DEFAULT_PLATFORMS = ["linux-64", "linux-32", "osx-64", "win-64", "win-32"]
+DEFAULT_PLATFORMS = ["linux-64", "linux-32", "osx-64", "win-64", "win-32", "noarch"]
 
 
 def _maybe_split_channel(channel):
@@ -145,8 +145,7 @@ def _make_arg_parser():
     ap.add_argument(
         "--platform",
         help=(
-            "The OS platform(s) to mirror. one of: {'linux-64', 'linux-32',"
-            "'osx-64', 'win-32', 'win-64'}"
+            f"The OS platform(s) to mirror. e.g.: {', '.join(DEFAULT_PLATFORMS)}"
         ),
     )
     ap.add_argument(
@@ -719,7 +718,7 @@ def main(
         apply checks
     platform : str
         The platform that you wish to mirror for. Common options are
-        'linux-64', 'osx-64', 'win-64' and 'win-32'. Any platform is valid as
+        'linux-64', 'osx-64', 'win-64, 'win-32' and 'noarch'. Any platform is valid as
         long as the url resolves.
     blacklist : iterable of tuples, optional
         The values of blacklist should be (key, glob) where key is one of the
