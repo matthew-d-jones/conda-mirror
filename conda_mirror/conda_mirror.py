@@ -1055,7 +1055,6 @@ def main(
         excluded_packages.difference_update(required_packages)
 
     if include_depends:
-        included_package_names.remove("")
         excluded_packages = _restore_required_dependencies(
             packages, excluded_packages, required_packages, included_package_names
         )
