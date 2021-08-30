@@ -937,38 +937,48 @@ def _find_non_recent_packages(
 
     non_recent_packages: Set[str] = set()
 
-    if latest_non_dev >= 0 or latest_dev >= 0:
+    if latest_non_dev < 0 and latest_dev < 0:
+        return non_recent_packages
 
-        class PackageAndVersion(NamedTuple):
-            package_file: str
-            version: VersionOrder
+    class PackageAndVersion(NamedTuple):
+        package_file: str
+        version: str
 
-        packages_by_name: Dict[str, List[PackageAndVersion]] = {}
-        for key in include:
-            metadata = packages[key]
-            try:
-                packages_by_name.setdefault(metadata["name"], []).append(
-                    PackageAndVersion(key, VersionOrder(metadata["version"]))
-                )
-            except KeyError:
-                pass  # ignore bad entries
+    packages_by_name: Dict[str, List[PackageAndVersion]] = {}
+    for key in include:
+        metadata = packages[key]
+        try:
+            packages_by_name.setdefault(metadata["name"], []).append(
+                PackageAndVersion(key, metadata["version"])
+            )
+        except KeyError:
+            pass  # ignore bad entries
 
-        for curpackages in packages_by_name.values():
-            curpackages.sort(
-                key=lambda x: x.version, reverse=True
-            )  # recent versions first
-            dev_versions = [
-                p.package_file for p in curpackages if "DEV" in p.version.version[-1]
-            ]
-            non_dev_versions = [
-                p.package_file
-                for p in curpackages
-                if "DEV" not in p.version.version[-1]
-            ]
-            if latest_dev >= 0:
-                non_recent_packages.update(dev_versions[latest_dev:])
-            if latest_non_dev >= 0:
-                non_recent_packages.update(non_dev_versions[latest_non_dev:])
+    # non-development version pattern includes simple versions and ones with a postrelease tag.
+    non_dev_pattern = re.compile(r"\.(post)?\d+$", flags=re.IGNORECASE)
+
+    # We explicitly specify development tags and ignore any unrecognized tags
+    # to support cases like the 'prev' tag suggested in
+    # (https://github.com/conda/conda/issues/5021#issuecomment-777813884).
+    # In practice, in conda-forge and the official anaconda channels I only see
+    # 'dev' and a few instances of 'b'.
+    dev_pattern = re.compile(r"\.(dev|rc|a|b|alpha|beta)\d*$", flags=re.IGNORECASE)
+
+    for curpackages in packages_by_name.values():
+        curpackages.sort(key=lambda x: VersionOrder(x.version), reverse=True)
+        dev_versions = []
+        non_dev_versions = []
+        for p in curpackages:
+            if non_dev_pattern.search(p.version):
+                non_dev_versions.append(p.package_file)
+            elif dev_pattern.search(p.version):
+                dev_versions.append(p.package_file)
+            else:
+                non_recent_packages.add(p.package_file)
+        if latest_dev >= 0:
+            non_recent_packages.update(dev_versions[latest_dev:])
+        if latest_non_dev >= 0:
+            non_recent_packages.update(non_dev_versions[latest_non_dev:])
 
     return non_recent_packages
 
