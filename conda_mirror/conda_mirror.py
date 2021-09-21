@@ -1194,11 +1194,22 @@ def main(
     unblacklist_the_whitelist(whitelist, packages)
     unblacklist_the_whitelist(noarch_whitelist, noarch_packages)
 
-    # TODO do this AFTER 3b (remove non-latest packages)
-    # unblacklist packages which are dependencies
+    all_packages = {**packages, **noarch_packages}
+
+    non_recent_packages = _find_non_recent_packages(
+        all_packages,
+        include=required_packages,
+        latest_non_dev=latest_non_dev,
+        latest_dev=latest_dev,
+    )
+    # Remove non_recent_packages from required and add them to excluded
+    required_packages.difference_update(non_recent_packages)
+    excluded_packages.update(non_recent_packages)
+
+    # Remove packages which are dependencies from excluded_packages
     if include_depends:
         excluded_packages = _restore_required_dependencies(
-            packages, excluded_packages, required_packages, included_package_names
+            all_packages, excluded_packages, required_packages, included_package_names
         )
 
     # make final mirror list of not-blacklist + whitelist
@@ -1218,16 +1229,7 @@ def main(
         logger.info("PACKAGES TO BE REMOVED")
         logger.info(pformat(sorted(packages_slated_for_removal)))
 
-    possible_packages_to_mirror = set(packages.keys()) - excluded_packages
-
-    # 3b remove non-latest packages if so specified.
-    non_recent_packages = _find_non_recent_packages(
-        packages,
-        include=possible_packages_to_mirror,
-        latest_non_dev=latest_non_dev,
-        latest_dev=latest_dev,
-    )
-    possible_packages_to_mirror -= non_recent_packages
+    possible_packages_to_mirror = set(all_packages.keys()) - excluded_packages
 
     # 4. Validate all local packages
     # construct the desired package repodata
