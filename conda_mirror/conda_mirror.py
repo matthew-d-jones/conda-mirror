@@ -1170,8 +1170,8 @@ def main(
     noarch_info, noarch_packages = get_repodata(
         upstream_channel, "noarch", proxies=proxies, ssl_verify=ssl_verify
     )
-    both_info = {platform: info, 'noarch': noarch_info}
-    both_packages = {platform: packages, 'noarch': noarch_packages}
+    both_info = {platform: info, "noarch": noarch_info}
+    both_packages = {platform: packages, "noarch": noarch_packages}
 
     # 1. validate local repo
     # validating all packages is taking many hours.
@@ -1226,7 +1226,10 @@ def main(
     # Remove packages which are dependencies from excluded_packages
     if include_depends:
         excluded_packages = _restore_required_dependencies(
-            all_packages, excluded_packages, required_packages, included_package_names,
+            all_packages,
+            excluded_packages,
+            required_packages,
+            included_package_names,
             latest_non_dev=latest_non_dev,
             latest_dev=latest_dev,
         )
@@ -1253,15 +1256,17 @@ def main(
     # 4. Validate all local packages
     # construct the desired package repodata
     platform_repodata = {
-        pkgname: all_packages[pkgname] for pkgname in possible_packages_to_mirror if
-        all_packages[pkgname]['subdir'] == platform
+        pkgname: all_packages[pkgname]
+        for pkgname in possible_packages_to_mirror
+        if all_packages[pkgname]["subdir"] == platform
     }
     noarch_repodata = {
-        pkgname: all_packages[pkgname] for pkgname in possible_packages_to_mirror if
-        all_packages[pkgname]['subdir'] == 'noarch'
+        pkgname: all_packages[pkgname]
+        for pkgname in possible_packages_to_mirror
+        if all_packages[pkgname]["subdir"] == "noarch"
     }
     noarch_path = os.path.join(target_directory, "noarch")
-    both_local_paths = {platform: local_directory, 'noarch': noarch_path}
+    both_local_paths = {platform: local_directory, "noarch": noarch_path}
     if not (dry_run or no_validate_target):
         # Only validate if we're not doing a dry-run
         validation_results = _validate_packages(
@@ -1277,7 +1282,7 @@ def main(
     # mirror list
     local_packages = _list_conda_packages(local_directory)
     local_noarch_packages = _list_conda_packages(noarch_path)
-    all_local_packages = {platform: local_packages, 'noarch': local_noarch_packages}
+    all_local_packages = {platform: local_packages, "noarch": local_noarch_packages}
     to_mirror = possible_packages_to_mirror - set(local_packages)
     to_mirror = to_mirror - set(local_noarch_packages)
     logger.info("PACKAGES TO MIRROR")
@@ -1296,7 +1301,7 @@ def main(
     minimum_free_space_kb = minimum_free_space * 1024 * 1024
     download_url, channel = _maybe_split_channel(upstream_channel)
     session = requests.Session()
-    for platform_name in (platform, 'noarch'):
+    for platform_name in (platform, "noarch"):
         with tempfile.TemporaryDirectory(dir=temp_directory) as download_dir:
             logger.info("downloading to the tempdir %s", download_dir)
             for package_name in tqdm(
@@ -1306,7 +1311,7 @@ def main(
                 leave=False,
                 disable=not show_progress,
             ):
-                if all_packages[package_name]['subdir'] == platform_name:
+                if all_packages[package_name]["subdir"] == platform_name:
                     url = download_url.format(
                         channel=channel, platform=platform_name, file_name=package_name
                     )
@@ -1360,10 +1365,15 @@ def main(
 
             # 8. Use already downloaded repodata.json contents but prune it of
             # packages we don't want
-            repodata = {"info": both_info[platform_name], "packages": both_packages[platform_name]}
+            repodata = {
+                "info": both_info[platform_name],
+                "packages": both_packages[platform_name],
+            }
 
             # compute the packages that we have locally
-            packages_we_have = set(all_local_packages[platform_name] + _list_conda_packages(download_dir))
+            packages_we_have = set(
+                all_local_packages[platform_name] + _list_conda_packages(download_dir)
+            )
             # remake the packages dictionary with only the packages we have
             # locally
             repodata["packages"] = {
