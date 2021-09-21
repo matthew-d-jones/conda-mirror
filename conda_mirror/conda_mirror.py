@@ -1301,6 +1301,8 @@ def main(
     minimum_free_space_kb = minimum_free_space * 1024 * 1024
     download_url, channel = _maybe_split_channel(upstream_channel)
     session = requests.Session()
+    if not os.path.exists(noarch_path):
+        os.makedirs(noarch_path, exist_ok=True)
     for platform_name in (platform, "noarch"):
         with tempfile.TemporaryDirectory(dir=temp_directory) as download_dir:
             logger.info("downloading to the tempdir %s", download_dir)
@@ -1396,10 +1398,10 @@ def main(
                 shutil.move(download_path, move_path)
 
     # Also need to make a "noarch" channel or conda gets mad
-    if not os.path.exists(noarch_path):
-        os.makedirs(noarch_path, exist_ok=True)
-        noarch_repodata = {"info": {}, "packages": {}}
-        _write_repodata(noarch_path, noarch_repodata)
+    # if not os.path.exists(noarch_path):
+    #     os.makedirs(noarch_path, exist_ok=True)
+    #     noarch_repodata = {"info": {}, "packages": {}}
+    #     _write_repodata(noarch_path, noarch_repodata)
 
     return summary
 
