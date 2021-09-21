@@ -488,6 +488,8 @@ def _parse_and_format_args():
 
     blacklist = config_dict.get("blacklist")
     whitelist = config_dict.get("whitelist")
+    noarch_blacklist = config_dict.get("noarch_blacklist")
+    noarch_whitelist = config_dict.get("noarch_whitelist")
 
     for required in ("target_directory", "platform", "upstream_channel"):
         if not getattr(args, required):
@@ -531,6 +533,8 @@ def _parse_and_format_args():
         "num_threads": args.num_threads,
         "blacklist": blacklist,
         "whitelist": whitelist,
+        "noarch_blacklist": noarch_blacklist,
+        "noarch_whitelist": noarch_whitelist,
         "include_depends": args.include_depends,
         "latest_dev": latest_dev,
         "latest_non_dev": latest_non_dev,
@@ -1004,6 +1008,8 @@ def main(
     platform,
     blacklist=None,
     whitelist=None,
+    noarch_blacklist=None,
+    noarch_whitelist=None,
     include_depends=False,
     latest_non_dev: int = -1,
     latest_dev: int = -1,
@@ -1045,6 +1051,8 @@ def main(
         The values of blacklist should be (key, glob) where key is one of the
         keys in the repodata['packages'] dicts and glob is a thing to match
         on.  Note that all comparisons will be laundered through lowercasing.
+    noarch_blacklist : iterable of tuples, optional
+    noarch_whitelist : iterable of tuples, optional
     include_depends: bool
         If true, then include packages matching dependencies of whitelisted
         packages as well.
@@ -1143,6 +1151,10 @@ def main(
     info, packages = get_repodata(
         upstream_channel, platform, proxies=proxies, ssl_verify=ssl_verify
     )
+    noarch_info, noarch_packages = get_repodata(
+        upstream_channel, "noarch", proxies=proxies, ssl_verify=ssl_verify
+    )
+    # TODO separate noarch whitelist+blacklist
 
     # 1. validate local repo
     # validating all packages is taking many hours.
@@ -1153,26 +1165,37 @@ def main(
     # 2. figure out excluded packages
     excluded_packages: Set[str] = set()
     required_packages: Set[str] = set()
-    # match blacklist conditions
-    if blacklist:
-        for blist in blacklist:
-            logger.debug("exclude item: %s", blist)
-            matched_packages = list(_match(packages, blist))
-            logger.debug(pformat(matched_packages))
-            excluded_packages.update(matched_packages)
+
+    def match_blacklist_conditions(blcklist, pckgs):
+        if blcklist:
+            for blist in blcklist:
+                logger.debug("exclude item: %s", blist)
+                matched_packages = list(_match(pckgs, blist))
+                logger.debug(pformat(matched_packages))
+                excluded_packages.update(matched_packages)
+
+    match_blacklist_conditions(blacklist, packages)
+    match_blacklist_conditions(noarch_blacklist, noarch_packages)
 
     # 3. un-blacklist packages that are actually whitelisted
     # match whitelist on blacklist
-    included_package_names: Set[str] = set()
-    if whitelist:
-        for wlist in whitelist:
-            name = wlist.get("name")
-            if name and "*" not in name:
-                included_package_names.add(name)
-            matched_packages = list(_match(packages, wlist))
-            required_packages.update(matched_packages)
-        excluded_packages.difference_update(required_packages)
 
+    def unblacklist_the_whitelist(whtlist, pckgs):
+        if whitelist:
+            for wlist in whitelist:
+                name = wlist.get("name")
+                if name and "*" not in name:
+                    included_package_names.add(name)
+                matched_packages = list(_match(pckgs, wlist))
+                required_packages.update(matched_packages)
+            excluded_packages.difference_update(required_packages)
+
+    included_package_names: Set[str] = set()
+    unblacklist_the_whitelist(whitelist, packages)
+    unblacklist_the_whitelist(noarch_whitelist, noarch_packages)
+
+    # TODO do this AFTER 3b (remove non-latest packages)
+    # unblacklist packages which are dependencies
     if include_depends:
         excluded_packages = _restore_required_dependencies(
             packages, excluded_packages, required_packages, included_package_names
