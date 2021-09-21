@@ -232,7 +232,7 @@ def _restore_required_dependencies(
                 matcher = DependsMatcher(version_spec)
                 if matcher(info):
                     # TODO don't hardcode this, base it off the config!
-                    if info['name'] == 'python' or info['subdir'] == 'noarch' or "py38" in info['build']:
+                    if not any(substr in info['build'] for substr in ("py27", "py35", "py36", "py37", "py39")):
                         matched.add(k)
                         break
 
