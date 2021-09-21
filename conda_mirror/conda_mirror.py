@@ -1170,7 +1170,8 @@ def main(
     noarch_info, noarch_packages = get_repodata(
         upstream_channel, "noarch", proxies=proxies, ssl_verify=ssl_verify
     )
-    # TODO separate noarch whitelist+blacklist
+    both_info = {platform: info, 'noarch': noarch_info}
+    both_packages = {platform: packages, 'noarch': noarch_packages}
 
     # 1. validate local repo
     # validating all packages is taking many hours.
@@ -1251,20 +1252,34 @@ def main(
 
     # 4. Validate all local packages
     # construct the desired package repodata
-    desired_repodata = {
-        pkgname: packages[pkgname] for pkgname in possible_packages_to_mirror
+    platform_repodata = {
+        pkgname: all_packages[pkgname] for pkgname in possible_packages_to_mirror if
+        all_packages[pkgname]['subdir'] == platform
     }
+    noarch_repodata = {
+        pkgname: all_packages[pkgname] for pkgname in possible_packages_to_mirror if
+        all_packages[pkgname]['subdir'] == 'noarch'
+    }
+    noarch_path = os.path.join(target_directory, "noarch")
+    both_local_paths = {platform: local_directory, 'noarch': noarch_path}
     if not (dry_run or no_validate_target):
         # Only validate if we're not doing a dry-run
         validation_results = _validate_packages(
-            desired_repodata, local_directory, num_threads
+            platform_repodata, local_directory, num_threads
+        )
+        summary["validating-existing"].update(validation_results)
+        validation_results = _validate_packages(
+            noarch_repodata, noarch_path, num_threads
         )
         summary["validating-existing"].update(validation_results)
     # 5. figure out final list of packages to mirror
     # do the set difference of what is local and what is in the final
     # mirror list
     local_packages = _list_conda_packages(local_directory)
+    local_noarch_packages = _list_conda_packages(noarch_path)
+    all_local_packages = {platform: local_packages, 'noarch': local_noarch_packages}
     to_mirror = possible_packages_to_mirror - set(local_packages)
+    to_mirror = to_mirror - set(local_noarch_packages)
     logger.info("PACKAGES TO MIRROR")
     logger.info(pformat(sorted(to_mirror)))
     summary["to-mirror"].update(to_mirror)
@@ -1281,95 +1296,96 @@ def main(
     minimum_free_space_kb = minimum_free_space * 1024 * 1024
     download_url, channel = _maybe_split_channel(upstream_channel)
     session = requests.Session()
-    with tempfile.TemporaryDirectory(dir=temp_directory) as download_dir:
-        logger.info("downloading to the tempdir %s", download_dir)
-        for package_name in tqdm(
-            sorted(to_mirror),
-            desc=platform,
-            unit="package",
-            leave=False,
-            disable=not show_progress,
-        ):
-            url = download_url.format(
-                channel=channel, platform=platform, file_name=package_name
+    for platform_name in (platform, 'noarch'):
+        with tempfile.TemporaryDirectory(dir=temp_directory) as download_dir:
+            logger.info("downloading to the tempdir %s", download_dir)
+            for package_name in tqdm(
+                sorted(to_mirror),
+                desc=platform_name,
+                unit="package",
+                leave=False,
+                disable=not show_progress,
+            ):
+                if all_packages[package_name]['subdir'] == platform_name:
+                    url = download_url.format(
+                        channel=channel, platform=platform_name, file_name=package_name
+                    )
+                    try:
+                        # make sure we have enough free disk space in the temp folder to meet threshold
+                        if shutil.disk_usage(download_dir).free < minimum_free_space_kb:
+                            logger.error(
+                                "Disk space below threshold in %s. Aborting download.",
+                                download_dir,
+                            )
+                            break
+
+                        # download package
+                        total_bytes += _download_backoff_retry(
+                            url,
+                            download_dir,
+                            session,
+                            proxies=proxies,
+                            ssl_verify=ssl_verify,
+                            chunk_size=chunk_size,
+                            max_retries=max_retries,
+                            show_progress=show_progress,
+                        )
+
+                        # make sure we have enough free disk space in the target folder to meet threshold
+                        # while also being able to fit the packages we have already downloaded
+                        if (
+                            shutil.disk_usage(target_directory).free - total_bytes
+                        ) < minimum_free_space_kb:
+                            logger.error(
+                                "Disk space below threshold in %s. Aborting download",
+                                target_directory,
+                            )
+                            break
+
+                        summary["downloaded"].add((url, download_dir))
+                    except Exception as ex:
+                        logger.exception("Unexpected error: %s. Aborting download.", ex)
+                        break
+
+            # validate all packages in the download directory
+            validation_results = _validate_packages(
+                all_packages, download_dir, num_threads=num_threads
             )
-            try:
-                # make sure we have enough free disk space in the temp folder to meet threshold
-                if shutil.disk_usage(download_dir).free < minimum_free_space_kb:
-                    logger.error(
-                        "Disk space below threshold in %s. Aborting download.",
-                        download_dir,
-                    )
-                    break
+            summary["validating-new"].update(validation_results)
+            logger.debug(
+                "Newly downloaded files at %s are %s",
+                download_dir,
+                pformat(os.listdir(download_dir)),
+            )
 
-                # download package
-                total_bytes += _download_backoff_retry(
-                    url,
-                    download_dir,
-                    session,
-                    proxies=proxies,
-                    ssl_verify=ssl_verify,
-                    chunk_size=chunk_size,
-                    max_retries=max_retries,
-                    show_progress=show_progress,
-                )
+            # 8. Use already downloaded repodata.json contents but prune it of
+            # packages we don't want
+            repodata = {"info": both_info[platform_name], "packages": both_packages[platform_name]}
 
-                # make sure we have enough free disk space in the target folder to meet threshold
-                # while also being able to fit the packages we have already downloaded
-                if (
-                    shutil.disk_usage(local_directory).free - total_bytes
-                ) < minimum_free_space_kb:
-                    logger.error(
-                        "Disk space below threshold in %s. Aborting download",
-                        local_directory,
-                    )
-                    break
+            # compute the packages that we have locally
+            packages_we_have = set(all_local_packages[platform_name] + _list_conda_packages(download_dir))
+            # remake the packages dictionary with only the packages we have
+            # locally
+            repodata["packages"] = {
+                name: info
+                for name, info in repodata["packages"].items()
+                if name in packages_we_have
+            }
+            _write_repodata(download_dir, repodata)
 
-                summary["downloaded"].add((url, download_dir))
-            except Exception as ex:
-                logger.exception("Unexpected error: %s. Aborting download.", ex)
-                break
+            # move new conda packages
+            for f in _list_conda_packages(download_dir):
+                old_path = os.path.join(download_dir, f)
+                new_path = os.path.join(both_local_paths[platform_name], f)
+                logger.info("moving %s to %s", old_path, new_path)
+                shutil.move(old_path, new_path)
 
-        # validate all packages in the download directory
-        validation_results = _validate_packages(
-            packages, download_dir, num_threads=num_threads
-        )
-        summary["validating-new"].update(validation_results)
-        logger.debug(
-            "Newly downloaded files at %s are %s",
-            download_dir,
-            pformat(os.listdir(download_dir)),
-        )
-
-        # 8. Use already downloaded repodata.json contents but prune it of
-        # packages we don't want
-        repodata = {"info": info, "packages": packages}
-
-        # compute the packages that we have locally
-        packages_we_have = set(local_packages + _list_conda_packages(download_dir))
-        # remake the packages dictionary with only the packages we have
-        # locally
-        repodata["packages"] = {
-            name: info
-            for name, info in repodata["packages"].items()
-            if name in packages_we_have
-        }
-        _write_repodata(download_dir, repodata)
-
-        # move new conda packages
-        for f in _list_conda_packages(download_dir):
-            old_path = os.path.join(download_dir, f)
-            new_path = os.path.join(local_directory, f)
-            logger.info("moving %s to %s", old_path, new_path)
-            shutil.move(old_path, new_path)
-
-        for f in ("repodata.json", "repodata.json.bz2"):
-            download_path = os.path.join(download_dir, f)
-            move_path = os.path.join(local_directory, f)
-            shutil.move(download_path, move_path)
+            for f in ("repodata.json", "repodata.json.bz2"):
+                download_path = os.path.join(download_dir, f)
+                move_path = os.path.join(both_local_paths[platform_name], f)
+                shutil.move(download_path, move_path)
 
     # Also need to make a "noarch" channel or conda gets mad
-    noarch_path = os.path.join(target_directory, "noarch")
     if not os.path.exists(noarch_path):
         os.makedirs(noarch_path, exist_ok=True)
         noarch_repodata = {"info": {}, "packages": {}}
