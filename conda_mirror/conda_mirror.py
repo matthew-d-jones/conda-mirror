@@ -174,6 +174,8 @@ def _restore_required_dependencies(
     excluded: Set[str],
     required: Set[str],
     processed_names: Set[str],
+    latest_non_dev: int,
+    latest_dev: int,
 ) -> Set[str]:
     """Recursively removes dependencies of required packages from excluded packages.
 
@@ -221,15 +223,29 @@ def _restore_required_dependencies(
 
         cur_required.clear()
 
+        # Find packages which meet dependency version requirement
+        matched = set()
         for k in list(final_excluded):
             info = all_packages.get(k, {})
             pkg_name = info.get("name")
             for version_spec in required_depend_specs.get(pkg_name, ()):
                 matcher = DependsMatcher(version_spec)
                 if matcher(info):
-                    final_excluded.remove(k)
-                    cur_required.add(k)
+                    matched.add(k)
                     break
+
+        # Keep only latest required packages if requested
+        if latest_dev >= 0 or latest_non_dev >= 0:
+            non_recent_matched_packages = _find_non_recent_packages(
+                all_packages,
+                include=matched,
+                latest_non_dev=latest_non_dev,
+                latest_dev=latest_dev,
+            )
+            matched.difference_update(non_recent_matched_packages)
+
+        final_excluded.difference_update(matched)
+        cur_required.update(matched)
 
     return final_excluded
 
@@ -1209,7 +1225,9 @@ def main(
     # Remove packages which are dependencies from excluded_packages
     if include_depends:
         excluded_packages = _restore_required_dependencies(
-            all_packages, excluded_packages, required_packages, included_package_names
+            all_packages, excluded_packages, required_packages, included_package_names,
+            latest_non_dev=latest_non_dev,
+            latest_dev=latest_dev,
         )
 
     # make final mirror list of not-blacklist + whitelist
