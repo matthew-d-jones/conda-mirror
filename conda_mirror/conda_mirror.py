@@ -1181,8 +1181,8 @@ def main(
     # match whitelist on blacklist
 
     def unblacklist_the_whitelist(whtlist, pckgs):
-        if whitelist:
-            for wlist in whitelist:
+        if whtlist:
+            for wlist in whtlist:
                 name = wlist.get("name")
                 if name and "*" not in name:
                     included_package_names.add(name)
