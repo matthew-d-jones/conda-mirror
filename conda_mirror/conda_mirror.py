@@ -231,8 +231,10 @@ def _restore_required_dependencies(
             for version_spec in required_depend_specs.get(pkg_name, ()):
                 matcher = DependsMatcher(version_spec)
                 if matcher(info):
-                    matched.add(k)
-                    break
+                    # TODO don't hardcode this, base it off the config!
+                    if info['subdir'] == 'noarch' or "py38" in info['build']:
+                        matched.add(k)
+                        break
 
         # Keep only latest required packages if requested
         if latest_dev >= 0 or latest_non_dev >= 0:
